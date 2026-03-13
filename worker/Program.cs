@@ -16,8 +16,14 @@ namespace Worker
         {
             try
             {
-                var pgsql = OpenDbConnection("Server=db;Username=postgres;Password=postgres;");
-                var redisConn = OpenRedisConnection("redis");
+                var redisHost = Environment.GetEnvironmentVariable("REDIS_HOST") ?? "redis";
+                var pgHost = Environment.GetEnvironmentVariable("POSTGRES_HOST") ?? "db";
+                var pgUser = Environment.GetEnvironmentVariable("POSTGRES_USER") ?? "postgres";
+                var pgPassword = Environment.GetEnvironmentVariable("POSTGRES_PASSWORD") ?? "postgres";
+                var pgDb = Environment.GetEnvironmentVariable("POSTGRES_DB") ?? "postgres";
+
+                var pgsql = OpenDbConnection($"Server={pgHost};Username={pgUser};Password={pgPassword};Database={pgDb};");
+                var redisConn = OpenRedisConnection(redisHost);
                 var redis = redisConn.GetDatabase();
 
                 // Keep alive is not implemented in Npgsql yet. This workaround was recommended:
@@ -34,7 +40,7 @@ namespace Worker
                     // Reconnect redis if down
                     if (redisConn == null || !redisConn.IsConnected) {
                         Console.WriteLine("Reconnecting Redis");
-                        redisConn = OpenRedisConnection("redis");
+                        redisConn = OpenRedisConnection(redisHost);
                         redis = redisConn.GetDatabase();
                     }
                     string json = redis.ListLeftPopAsync("votes").Result;
@@ -46,7 +52,7 @@ namespace Worker
                         if (!pgsql.State.Equals(System.Data.ConnectionState.Open))
                         {
                             Console.WriteLine("Reconnecting DB");
-                            pgsql = OpenDbConnection("Server=db;Username=postgres;Password=postgres;");
+                            pgsql = OpenDbConnection($"Server={pgHost};Username={pgUser};Password={pgPassword};Database={pgDb};");
                         }
                         else
                         { // Normal +1 vote requested
@@ -124,11 +130,15 @@ namespace Worker
         }
 
         private static string GetIp(string hostname)
-            => Dns.GetHostEntryAsync(hostname)
+        {
+            if (System.Net.IPAddress.TryParse(hostname, out _))
+                return hostname;
+            return Dns.GetHostEntryAsync(hostname)
                 .Result
                 .AddressList
                 .First(a => a.AddressFamily == AddressFamily.InterNetwork)
                 .ToString();
+        }
 
         private static void UpdateVote(NpgsqlConnection connection, string voterId, string vote)
         {
